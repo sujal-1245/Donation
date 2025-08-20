@@ -8,6 +8,7 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // needed for PayU POST form callbacks
 
 // ✅ Proper CORS setup
 app.use(
@@ -71,6 +72,43 @@ app.post("/api/payment", (req, res) => {
     });
   } catch (err) {
     console.error("/api/payment error", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ✅ PayU Response Verification (Success/Failure)
+app.post("/api/payment/verify", (req, res) => {
+  try {
+    const {
+      key,
+      txnid,
+      amount,
+      productinfo,
+      firstname,
+      email,
+      status,
+      hash,
+    } = req.body;
+
+    // PayU sends reverse hash format: SALT|status|||||||||||email|firstname|productinfo|amount|txnid|key
+    const reverseSeq = `${PAYU_SALT}|${status}|||||||||||${email}|${firstname}|${productinfo}|${amount}|${txnid}|${key}`;
+    const expectedHash = sha512(reverseSeq);
+
+    if (expectedHash !== hash) {
+      console.error("❌ Hash mismatch for txn:", txnid);
+      return res.status(400).json({ success: false, error: "Invalid hash" });
+    }
+
+    // If hash matches & status is success
+    if (status === "success") {
+      console.log(`✅ Verified successful payment: ${txnid}`);
+      return res.json({ success: true, txnid, amount });
+    } else {
+      console.log(`⚠️ Payment failed: ${txnid}`);
+      return res.json({ success: false, txnid, amount });
+    }
+  } catch (err) {
+    console.error("/api/payment/verify error", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
